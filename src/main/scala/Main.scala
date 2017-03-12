@@ -1,7 +1,13 @@
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.coding.{DeflateCompressor, Gzip}
 import akka.stream.ActorMaterializer
 import akka.http.scaladsl.server.Directives._
+import akka.util.ByteString
+import com.twitter.finagle.{Service, Http => FinagleHttp}
+import com.twitter.finagle.http.{Request, Response, Status}
+import com.twitter.util.Future
+import io.netty.handler.codec.compression.JdkZlibEncoder
 
 object Main extends App {
   implicit val system = ActorSystem()
@@ -23,6 +29,31 @@ object Main extends App {
 
   private val textSmall = "Hello world"
 
+  new Thread(new Runnable {
+    new DeflateCompressor
+    def run(): Unit = {
+      FinagleHttp.server
+        .withDecompression(true)
+        .withCompressionLevel(9)
+        .serve("0.0.0.0:8889", new Service[Request, Response] {
+          def apply(request: Request): Future[Response] = {
+            request.path match {
+              case "/large" =>
+                val response = Response()
+                response.contentString = textLarge
+                Future.value(response)
+              case "/small" =>
+                val response = Response()
+                response.contentString = textLarge
+                Future.value(response)
+              case _ =>
+                Future.value(Response(Status.NotFound))
+            }
+          }
+        })
+    }
+  }).start()
+
   val root = path("large") {
     get {
       encodeResponse {
@@ -35,6 +66,8 @@ object Main extends App {
         complete(textSmall)
       }
     }
+  } ~ path("large-gzip-strict") {
+    complete(Gzip.encode(ByteString(textLarge)))
   }
 
   Http().bindAndHandle(root, "localhost", 8888)
